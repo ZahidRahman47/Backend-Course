@@ -8,39 +8,55 @@ datasource db {
   provider = "postgresql"
 }
 
-// USER => MOVIE => USERWATCHLIST
+// USER -> MOVIE -> WATCHLIST
 
 model User {
-  id        String        @id @default(uuid())
-  name      String
-  email     String        @unique
-  password  String
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  watchlist UserWatchList[]
+  id       String @id @default(uuid())
+  name     String
+  email    String @unique
+  password String
+
+  createdAt DateTime @default(now())
+
+  // Relations
+  movies         Movie[]         @relation("MovieCreator")
+  watchlistItems WatchlistItem[]
 }
 
 model Movie {
-  id          String        @id @default(uuid())
+  id          String   @id @default(uuid())
   title       String
-  description String?
-  releaseYear Int?
-  duration    Int?
-  genre       String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  watchlist   UserWatchList[]
+  overview    String?
+  releaseYear Int
+  genres      String[] @default([])
+  runtime     Int?
+  posterUrl   String?
+  createdBy   String
+  createdAt   DateTime @default(now())
+
+  creator        User            @relation("MovieCreator", fields: [createdBy], references: [id], onDelete: Cascade)
+  watchlistItems WatchlistItem[]
 }
 
-model UserWatchList {
-  id        String   @id @default(uuid())
+model WatchlistItem {
+  id        String          @id @default(uuid())
   userId    String
   movieId   String
-  createdAt DateTime @default(now())
+  status    WatchlistStatus @default(PLANNED)
+  rating    Int?
+  notes     String?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  movie     Movie    @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  movie Movie @relation(fields: [movieId], references: [id], onDelete: Cascade)
 
   @@unique([userId, movieId])
-  @@map("user_watchlist")
+}
+
+enum WatchlistStatus {
+  PLANNED
+  WATCHING
+  COMPLETED
+  DROPPED
 }
