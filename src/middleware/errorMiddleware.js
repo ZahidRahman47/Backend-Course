@@ -27,6 +27,13 @@ export const errorHandler = (err, req, res, next) => {
         })
     }
 
+    //body bigger than the limit in express.json().
+    if (err.type === "entity.too.large") {
+        return res.status(413).json({
+            error: "Request body is too large."
+        })
+    }
+
     //prisma errors.
     if (err.name === "PrismaClientKnownRequestError") {
         if (err.code === "P2002") {
@@ -37,9 +44,19 @@ export const errorHandler = (err, req, res, next) => {
         }
     }
 
-    console.log(`Logged Error: ${err.stack || err}`);
     const statusCode = err.statusCode || err.status || 500;
+
+    //expected client errors (4xx) keep their message. for 5xx the real error is
+    //logged with the stack trace but the client only gets a generic message,
+    //so internals (sql, file paths) never leak.
+    if (statusCode < 500) {
+        return res.status(statusCode).json({ error: err.message })
+    }
+
+    req.log.error({ err }, "Unhandled error");
     res.status(statusCode).json({
-        error: statusCode === 500 ? "Something went wrong." : err.message
+        error: "Something went wrong.",
+        //the client can report this id and we can find the exact log line.
+        requestId: req.id
     })
 }

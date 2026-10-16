@@ -1,54 +1,48 @@
-import express from "express";
-import cookieParser from "cookie-parser";
-
-//impot Routes.
-import movieRoutes from './routes/movieRoutes.js';
-import authRoutes from "./routes/authRoutes.js"
-import watchlistRoutes from "./routes/watchlistRoutes.js"
-import dotenv from 'dotenv';
+//starts the http server and handles shutdown. the app itself lives in app.js.
+import { env } from './config/env.js';
+import { logger } from './config/logger.js';
 import { connectDB, disconnectDB } from './config/db.js'
-import { notFound, errorHandler } from './middleware/errorMiddleware.js'
-dotenv.config();
-connectDB();
+import app from './app.js';
 
-const app = express();
-const port = process.env.PORT || 5001;
+//connect first, so we never accept requests we can't serve.
+await connectDB();
 
-
-//body parser middleware logic 
-app.use(express.json())
-app.use(express.urlencoded({ extended: true }))
-app.use(cookieParser())
-
-//core middlewares 
-app.use('/movies', movieRoutes);
-app.use('/auth', authRoutes);
-app.use('/watchlist' , watchlistRoutes)
-
-//error middlewares, must stay after the routes
-app.use(notFound)
-app.use(errorHandler)
-
-const server = app.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
+const server = app.listen(env.PORT, () => {
+    logger.info(`Server is running on port ${env.PORT} (${env.NODE_ENV})`);
 });
 
-process.on("unhandledRejection", (err, promise) => {
-    console.log(`Logged Error: ${err}`);
-    disconnectDB();
-    server.close(() => process.exit(1));
-});
+//graceful shutdown: stop taking new requests, let running requests finish,
+//then close the database connection. used on deploys, restarts and crashes.
+let shuttingDown = false;
+const shutdown = (reason, exitCode) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info(`${reason} received, shutting down gracefully`);
 
-process.on("uncaughtException", (err, promise) => {
-    console.log(`Logged Error: ${err}`);
-    disconnectDB();
-    server.close(() => process.exit(1));
-});
+    //if requests hang, don't wait forever.
+    setTimeout(() => {
+        logger.error("Could not finish in time, forcing shutdown");
+        process.exit(1);
+    }, 10_000).unref();
 
-process.on("SIGTERM", () => {
-    console.log("SIGTERM received, shutting down gracefully");
-    disconnectDB();
-    server.close(() => {
-        console.log("Process terminated!");
+    server.close(async () => {
+        await disconnectDB();
+        logger.info("Process terminated!");
+        process.exit(exitCode);
     });
-}); 
+};
+
+//SIGTERM: sent by docker / kubernetes / heroku when stopping the app. SIGINT: ctrl+c.
+process.on("SIGTERM", () => shutdown("SIGTERM", 0));
+process.on("SIGINT", () => shutdown("SIGINT", 0));
+
+//bugs: the app is in an unknown state, so log it and restart cleanly.
+process.on("unhandledRejection", (err) => {
+    logger.fatal({ err }, "Unhandled promise rejection");
+    shutdown("unhandledRejection", 1);
+});
+
+process.on("uncaughtException", (err) => {
+    logger.fatal({ err }, "Uncaught exception");
+    shutdown("uncaughtException", 1);
+});

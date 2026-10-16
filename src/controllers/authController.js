@@ -2,24 +2,31 @@ import { prisma } from "../config/db.js";
 import bcrypt from "bcryptjs";
 import { generateToken } from "../utils/generateToken.js";
 
+//cost factor: each +1 doubles the hashing time. 12 is about 250ms, slow on purpose for guessing.
+const SALT_ROUNDS = 12;
+//compared against when the email doesn't exist, so a wrong email takes as long as a
+//wrong password and response times don't reveal which emails are registered.
+const DUMMY_HASH = bcrypt.hashSync("dummy-password-for-timing", SALT_ROUNDS);
+
 const registerUser = async (req, res) => {
     const { name, email, password } = req.body;
 
     //check if user already exists.
+    //(two requests at the same moment can both pass this check, the unique
+    //index on email then makes one fail with P2002, which the error handler turns into 409)
     const userExists = await prisma.user.findUnique({
         where: { email: email }
     })
     if (userExists) {
-        return res.status(400).json({
+        return res.status(409).json({
             error: "User already exists with this email."
         })
     }
 
-    //hash the password that the user enter .
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt)
+    //hash the password that the user enter. bcrypt generates and stores the salt inside the hash.
+    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS)
 
-    //create user 
+    //create user
     const user = await prisma.user.create({
         data: {
             name,
@@ -27,7 +34,7 @@ const registerUser = async (req, res) => {
             password: hashedPassword
         }
     })
-    //generate token for user 
+    //generate token for user
     const token = generateToken(user.id, res);
 
     return res.status(201).json({
@@ -35,8 +42,8 @@ const registerUser = async (req, res) => {
         data: {
             user: {
                 id: user.id,
-                name: name,
-                email: email
+                name: user.name,
+                email: user.email
             },
             token,
         }
@@ -50,28 +57,25 @@ const login = async (req, res) => {
     const user = await prisma.user.findUnique({
         where: { email: email }
     })
-    if (!user) {
+
+    //verify the password. always run bcrypt, even when there is no user (see DUMMY_HASH).
+    const isPasswordValid = await bcrypt.compare(password, user?.password ?? DUMMY_HASH)
+
+    //same message for both cases, so attackers can't find out which emails exist.
+    if (!user || !isPasswordValid) {
         return res.status(401).json({
             error: "invalid Email or Password."
         })
     }
-
-    //verify the password.
-
-    const isPasswordValid = await bcrypt.compare(password, user.password)
-    if (!isPasswordValid) {
-        return res.status(401).json({
-            error: "invalid Email or Password."
-        })
-    }
-    //generate the JWT token 
+    //generate the JWT token
     const token = generateToken(user.id, res);
-    return res.status(201).json({
+    return res.status(200).json({
         status: "success",
         data: {
             user: {
                 id: user.id,
-                email: email
+                name: user.name,
+                email: user.email
             },
             token,
         }
@@ -91,6 +95,15 @@ const logout = async (req, res) => {
 
 }
 
+//returns the logged in user (set by authMiddleware, without the password).
+const getMe = async (req, res) => {
+    res.status(200).json({
+        status: "success",
+        data: {
+            user: req.user
+        }
+    })
+}
 
-export { registerUser, login, logout };
 
+export { registerUser, login, logout, getMe };

@@ -1,14 +1,15 @@
 import express from "express";
-import { getMovies, createMovie, updateMovie, deleteMovie } from "../controllers/movieController.js";
+import { getMovies, getMovieById, createMovie, updateMovie, deleteMovie } from "../controllers/movieController.js";
 import { authMiddleware } from "../middleware/authMiddleware.js";
 import { validateRequest } from "../middleware/validateRequest.js";
-import { createMovieSchema, updateMovieSchema, deleteMovieSchema } from "../validators/movieValidators.js";
+import { listMoviesSchema, getMovieSchema, createMovieSchema, updateMovieSchema, deleteMovieSchema } from "../validators/movieValidators.js";
 
 const router = express.Router();
 
 
 //public
-router.get('/', getMovies);
+router.get('/', validateRequest(listMoviesSchema), getMovies);
+router.get('/:id', validateRequest(getMovieSchema), getMovieById);
 
 //logged in users only
 router.post('/', authMiddleware, validateRequest(createMovieSchema), createMovie);
